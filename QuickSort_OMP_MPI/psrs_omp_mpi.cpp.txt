@@ -1,0 +1,279 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <mpi.h>
+#include <omp.h>
+#include <time.h>
+
+#define T 10
+
+// Função de comparação para o quicksort
+int compare(const void* a, const void* b) {
+    return (*(int*)a - *(int*)b);
+}
+
+// Função para verificar se o vetor está ordenado corretamente
+int isSorted(int* array, int size) {
+    int i;
+    for (i = 1; i < size; i++) {
+        if (array[i] < array[i - 1]) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+int Pivoteamento(int *array,int inferior, int superior)//utilizado para definir o Pivo
+{
+    int i, j,k, temporario,flag;
+
+    i = inferior+1;
+    j= superior;
+    k = array[inferior];
+    flag =0;
+
+    
+    while(flag==0)
+    {
+	
+         while((i < superior)&&(k>=array[i]))
+        {
+             i++;
+        }
+         while(k<array[j])
+        {
+            j--;
+        }
+        if(i<j)
+        {
+         	temporario = array[i];
+         	array[i] = array[j];
+         	array[j] = temporario;
+        }
+        else
+    	{
+        	temporario = array[inferior];
+        	array[inferior] = array[j];
+        	array[j] = temporario;
+        	//printf("\nsaiu da funcao %d\n",j);
+        	flag = 1;
+        	return(j);
+    	}
+	}
+
+}
+
+void quicksort(int *array,int inferior, int superior)
+{
+    int pivo;
+    if (inferior>= superior) return;//Final do vetor
+
+    pivo = Pivoteamento( array, inferior, superior);
+
+    quicksort(array,inferior, pivo - 1);
+    quicksort(array,pivo + 1, superior);
+}
+
+void psrs(int *data, int n, int argc, char** argv) 
+{
+    int rank, size;
+    //int* data;
+    int* localData;
+    int localSize;
+    int* sample;
+    int* localSamples;
+    int* pivot;
+    int* localPivots;
+    int* sendCounts;
+    int* sendDispls;
+    int* gatherCounts;
+    int* gatherRecvCounts;
+    int* gatherDispls;
+    int i;
+    //int n;
+
+    MPI_Init(&argc, &argv);
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+    if (argc < 2) {
+        if (rank == 0) {
+            printf("Uso: mpirun -np <num_procs> %s <tamanho_vetor>\n", argv[0]);
+        }
+        MPI_Finalize();
+        return ;
+    }
+
+    //n = atoi(argv[1]);
+    localSize = n / size;
+
+    //data = (int*)malloc(sizeof(int) * n);
+    localData = (int*)malloc(sizeof(int) * localSize);
+
+    if (rank == 0) {
+        // Preenche o vetor de entrada com valores aleatórios
+        //printf("Vetor de entrada:\n");
+        for (i = 0; i < n; i++) {
+            data[i] = rand() % 1000;
+            //printf("%d ", data[i]);
+        }
+        //printf("\n");
+    }
+
+    // Distribui o vetor de entrada entre os processos
+    MPI_Scatter(data, localSize, MPI_INT, localData, localSize, MPI_INT, 0, MPI_COMM_WORLD);
+
+
+    // Ordena localmente o vetor utilizando o quicksort
+    //qsort(localData, localSize, sizeof(int), compare);
+
+    #pragma omp parallel//Gera Zona paralela
+	{
+		int id = omp_get_thread_num(); //pega o valor id da Thread;			
+		quicksort(localData,0, localSize-1);
+    }
+
+    // Seleciona amostras locais aleatórias dos elementos ordenados
+    sample = (int*)malloc(sizeof(int) * size);
+
+    //printf("\nChegou 1\n");
+    #pragma omp parallel num_threads(T)
+    {
+        #pragma omp for private(i)
+        for (i = 0; i < size; i++) 
+        {
+         sample[i] = localData[i * localSize / size];
+        }
+       
+    }
+     
+    
+
+    // Coleta as amostras de todos os processos
+    localSamples = (int*)malloc(sizeof(int) * size * size);
+    MPI_Gather(sample, size, MPI_INT, localSamples, size, MPI_INT, 0, MPI_COMM_WORLD);
+
+    // Seleciona as amostras globais
+
+    
+    if (rank == 0) 
+    {
+        pivot = (int*)malloc(sizeof(int) * (size - 1));
+        #pragma omp parallel num_threads(T)
+        {
+           
+            for (i = 0; i < size - 1; i++) 
+            {
+                pivot[i] = localSamples[(i + 1) * size];
+             }
+
+              
+         }
+     }
+// printf("Chegou 1\n");    
+   
+//Apartir desse ponto apenas MPI
+    // Distribui os pivôs para todos os processos
+    localPivots = (int*)malloc(sizeof(int) * (size - 1));
+    MPI_Scatter(pivot, size - 1, MPI_INT, localPivots, size - 1, MPI_INT, 0, MPI_COMM_WORLD);
+
+    // Comunicação entre os processos para particionar os dados
+    MPI_Allgather(&localPivots[rank], 1, MPI_INT, localPivots, 1, MPI_INT, MPI_COMM_WORLD);
+
+    // Particiona os dados localmente usando os pivôs
+    int left = 0;
+    int right = localSize - 1;
+    while (left <= right) {
+        while (localData[left] < localPivots[rank]) {
+            left++;
+        }
+        while (localData[right] > localPivots[rank]) {
+            right--;
+        }
+        if (left <= right) {
+            int temp = localData[left];
+            localData[left] = localData[right];
+            localData[right] = temp;
+            left++;
+            right--;
+        }
+    }
+
+    // Comunicação entre os processos para trocar os elementos particionados
+    MPI_Alltoall(localData, localSize / size, MPI_INT, data, localSize / size, MPI_INT, MPI_COMM_WORLD);
+
+    // Ordena localmente os elementos recebidos
+    //qsort(data, n, sizeof(int), compare);
+
+     #pragma omp parallel//Gera Zona paralela
+	{
+		int id = omp_get_thread_num(); //pega o valor id da Thread;			
+		quicksort(data,0, n);
+    }
+
+    // Imprime o vetor final
+    if (rank == 0) {
+       // printf("Vetor ordenado:\n");
+        for (i = 0; i < n; i++) 
+        {
+            printf("%d", data[i]);
+            if(i == (n-1))
+            {
+              printf(".\n");
+            }
+            else
+            {
+                printf(", ");
+            }
+
+        }
+       
+        
+    }
+
+    // Verifica se o vetor está ordenado corretamente
+    int sorted = isSorted(data, n);
+
+    // Imprime o resultado
+   /*if (rank == 0) 
+   {
+        if (sorted) {
+            printf("O vetor foi ordenado corretamente.\n");
+        } else {
+            printf("O vetor não foi ordenado corretamente.\n");
+        }
+    }*/ 
+
+
+    MPI_Finalize();
+
+    
+    free(localData);
+    free(sample);
+    free(localSamples);
+    free(pivot);
+    free(localPivots);
+
+    
+}
+
+int main(int argc, char** argv) 
+{
+    int rank,*data,n;
+    srand(time(NULL)); //Starta a semente de numero aleatorio
+     n = atoi(argv[1]);
+    
+    data = (int*)malloc(sizeof(int) * n);
+
+        for (int i = 0; i < n; i++) 
+        {
+            data[i] = rand() % 100;
+            //printf("%d ", data[i]);
+        }
+
+        psrs(data, n, argc, argv) ;
+        free(data);
+
+        return 0;
+
+}
+

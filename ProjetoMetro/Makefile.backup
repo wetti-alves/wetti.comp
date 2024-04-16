@@ -1,0 +1,22 @@
+COMP = g++
+SRC = ./src
+INC = -I ./headers
+FLAGS = -Wall -Werror
+OUT = programaTrab
+
+OBJECTS = ./src/grafo.o
+
+all: $(OBJECTS)
+	$(COMP)	$(SRC)/main.cpp $(OBJECTS) -o $(OUT) $(INC) $(FLAGS)  
+
+%.o: $(SRC)/%.c
+	$(COMP) -c $< $(INC) $(FLAGS) -o $@
+
+run:
+	./$(OUT)
+
+clean:
+	rm -f $(SRC)/*.o
+
+zip:
+	zip -r ex.zip Makefile ./src ./headers

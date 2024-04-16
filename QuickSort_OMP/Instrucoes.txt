@@ -1,0 +1,15 @@
+As diretivas de compilação do Makefile são:
+
+make all
+
+para geração dos arquivos .o e executavel
+
+make run n=... nthreads=...
+
+Para executar o programa com os argumento n e nthreads
+
+make clean
+
+Para apagar todos os arquivos com excessão do makefile e qs-psrs.c
+
+
