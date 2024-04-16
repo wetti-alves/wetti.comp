@@ -1,0 +1,2 @@
+ Para Executar o codigo em todos os mapas é necessario alterar o caminho do mapa na  linha 61 ! desta forma
+sempre usar o caminho todo que aparece em propriedades do cenario, localização.
